@@ -1,42 +1,85 @@
+# Python
 import torch
-from torch.utils.data import DataLoader
-from data.div2k_dual_disk import DIV2KDualDisk
-from model.edsr_dual import EDSRDual
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import DataLoader
 
-DATASET_ROOT = r"C:\PROJECTS\modified-edsr\DIV2K_DUAL_LR"
+from data.div2k_dual_disk import DIV2KDualDisk
+from model.edsr_dual import EDSRDual
 
-BATCH_SIZE = 8
-EPOCHS = 25
-LR = 1e-4
-SCALE = 4
+def main():
+    # ------------------------
+    # Configuration
+    # ------------------------
+    DATASET_ROOT = r"C:\PROJECTS\modified-edsr\DIV2K_DUAL_LR"
 
-dataset = DIV2KDualDisk(DATASET_ROOT)
-loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+    BATCH_SIZE = 8
+    EPOCHS = 25
+    LR = 1e-4
+    SCALE = 4
+    NUM_WORKERS = 4
 
-device = torch.device("cuda")
-model = EDSRDual(scale=SCALE).to(device)
+    # ------------------------
+    # Device
+    # ------------------------
+    device = torch.device("cuda")
 
-criterion = nn.L1Loss()
-optimizer = optim.Adam(model.parameters(), lr=LR)
+    # ------------------------
+    # Dataset & Loader
+    # ------------------------
+    dataset = DIV2KDualDisk(DATASET_ROOT)
 
-for epoch in range(EPOCHS):
-    model.train()
-    epoch_loss = 0
+    loader = DataLoader(
+        dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=NUM_WORKERS,
+        pin_memory=True
+    )
 
-    for lr1, lr2, hr in loader:
-        lr1, lr2, hr = lr1.to(device), lr2.to(device), hr.to(device)
+    # ------------------------
+    # Model
+    # ------------------------
+    model = EDSRDual(scale=SCALE).to(device)
 
-        sr = model(lr1, lr2)
-        loss = criterion(sr, hr)
+    # ------------------------
+    # Loss & Optimizer
+    # ------------------------
+    criterion = nn.L1Loss()
+    optimizer = optim.Adam(model.parameters(), lr=LR)
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+    # ------------------------
+    # Training Loop
+    # ------------------------
+    for epoch in range(EPOCHS):
+        model.train()
+        epoch_loss = 0.0
 
-        epoch_loss += loss.item()
+        for lr1, lr2, hr in loader:
+            lr1 = lr1.to(device, non_blocking=True)
+            lr2 = lr2.to(device, non_blocking=True)
+            hr  = hr.to(device, non_blocking=True)
 
-    print(f"Epoch [{epoch+1}/{EPOCHS}] Loss: {epoch_loss/len(loader):.4f}")
+            # Forward
+            sr = model(lr1, lr2)
 
-torch.save(model.state_dict(), "edsr_dual.pth")
+            # Loss
+            loss = criterion(sr, hr)
+
+            # Backprop
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            epoch_loss += loss.item()
+
+        avg_loss = epoch_loss / len(loader)
+        print(f"Epoch [{epoch+1}/{EPOCHS}] | L1 Loss: {avg_loss:.4f}")
+
+    # ------------------------
+    # Save Model
+    # ------------------------
+    torch.save(model.state_dict(), "edsr_dual.pth")
+
+if __name__ == '__main__':
+    main()
